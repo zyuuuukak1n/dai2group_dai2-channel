@@ -6,12 +6,13 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const sort = event.queryStringParameters?.sort === 'latest' ? 'latest' : 'momentum';
     const limit = Math.min(parseInt(event.queryStringParameters?.limit || '50', 10) || 50, 100);
     const cursor = event.queryStringParameters?.cursor;
+    const tagId = event.queryStringParameters?.tagId;
 
     let result;
     if (sort === 'latest') {
-      result = await getThreadsLatest(limit, cursor);
+      result = await getThreadsLatest(limit, cursor, tagId);
     } else {
-      result = await getThreads('momentum', limit, cursor);
+      result = await getThreads('momentum', limit, cursor, tagId);
     }
 
     return {

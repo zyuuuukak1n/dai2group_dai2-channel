@@ -5,7 +5,24 @@ import { calculateMomentum } from '../core/momentum';
 import { sanitizeHtml } from '../core/sanitize';
 import { getThreadById } from '../repositories/threadRepository';
 import { createPost } from '../repositories/postRepository';
+import { getGlobalPushSubscription, getThreadSubscribers } from '../repositories/extendedRepository';
+import { incrementStat } from '../repositories/statsRepository';
 import { config } from '../config';
+import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import * as webpush from 'web-push';
+
+const ssm = new SSMClient({});
+let pushKeysCache: { publicKey: string, privateKey: string } | null = null;
+
+async function getPushKeys() {
+  if (pushKeysCache) return pushKeysCache;
+  const [pub, priv] = await Promise.all([
+    ssm.send(new GetParameterCommand({ Name: '/dai2channel/vapid/publicKey' })),
+    ssm.send(new GetParameterCommand({ Name: '/dai2channel/vapid/privateKey', WithDecryption: true }))
+  ]);
+  pushKeysCache = { publicKey: pub.Parameter?.Value || '', privateKey: priv.Parameter?.Value || '' };
+  return pushKeysCache;
+}
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   try {
@@ -79,6 +96,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       IsDeleted: false,
       IPHash: ipHash,
       ...(deleteKeyHash ? { DeleteKeyHash: deleteKeyHash } : {}),
+      ...(body.mediaUrl ? { MediaUrl: body.mediaUrl } : {}),
+      ...(body.deviceId ? { DeviceId: body.deviceId } : {}),
     };
 
     const updatedMetadata = {
@@ -89,6 +108,60 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     };
 
     await createPost(updatedMetadata, postItem, isSage);
+    await incrementStat('POST');
+
+    // --- PUSH NOTIFICATION LOGIC ---
+    // 1. Thread level subscriptions
+    const threadSubscribers = await getThreadSubscribers(threadId);
+    
+    // Extract mentions like >>1, >>2
+    const mentions = new Set<number>();
+    const anchorRegex = />>(\d+)/g;
+    let match;
+    while ((match = anchorRegex.exec(body.body)) !== null) {
+      mentions.add(parseInt(match[1], 10));
+    }
+
+    // Combine target deviceIds
+    const targetDeviceIds = new Set<string>();
+    
+    // Add thread subscribers (except the author's own device)
+    for (const devId of threadSubscribers) {
+      if (devId !== body.deviceId) {
+        targetDeviceIds.add(devId);
+      }
+    }
+
+    // Add anchor mention authors
+    if (mentions.size > 0) {
+      const { getPostByNumber } = await import('../repositories/postRepository');
+      for (const mention of mentions) {
+        const targetPost = await getPostByNumber(threadId, mention);
+        if (targetPost && targetPost.DeviceId && targetPost.DeviceId !== body.deviceId) {
+          targetDeviceIds.add(targetPost.DeviceId);
+        }
+      }
+    }
+
+    if (targetDeviceIds.size > 0) {
+      const keys = await getPushKeys();
+      webpush.setVapidDetails('mailto:admin@dai2channel.local', keys.publicKey, keys.privateKey);
+
+      for (const devId of targetDeviceIds) {
+        const sub = await getGlobalPushSubscription(devId);
+        if (sub) {
+          try {
+            await webpush.sendNotification(sub, JSON.stringify({
+              title: thread.title,
+              body: `${newResCount} ：${authorName}\n${sanitizedBody.substring(0, 50)}${sanitizedBody.length > 50 ? '...' : ''}`,
+              url: `/threads/${threadId.replace('thread#', '')}#post-${newResCount}`
+            }));
+          } catch (e) {
+            console.error('Push notification failed for devId:', devId, e);
+          }
+        }
+      }
+    }
 
     return {
       statusCode: 201,

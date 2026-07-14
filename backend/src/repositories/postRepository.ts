@@ -35,6 +35,7 @@ export async function getPostsByThreadId(threadId: string, limit: number, cursor
     trip: item.Trip, // Can be undefined
     dailyId: item.DailyID,
     body: item.Body,
+    mediaUrl: item.MediaUrl,
     createdAt: item.CreatedAt,
     isDeleted: item.IsDeleted,
   }));
@@ -114,6 +115,19 @@ export async function getPostWithSecrets(threadId: string, postId: string) {
 
   const response = await docClient.send(command);
   return response.Item;
+}
+
+export async function getPostByNumber(threadId: string, postNumber: number) {
+  const tableName = getTableName();
+  const command = new GetCommand({
+    TableName: tableName,
+    Key: {
+      PK: threadId,
+      SK: `POST#${String(postNumber).padStart(4, '0')}`,
+    },
+  });
+  const res = await docClient.send(command);
+  return res.Item;
 }
 
 export async function markPostAsDeleted(threadId: string, postId: string) {

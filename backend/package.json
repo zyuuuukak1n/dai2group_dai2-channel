@@ -11,7 +11,9 @@
     "@types/aws-lambda": "^8.10.162",
     "@types/bcryptjs": "^2.4.6",
     "@types/jest": "^30",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.10.1",
+    "@types/web-push": "^3.6.4",
     "aws-cdk": "2.1129.0",
     "esbuild": "^0.28.1",
     "jest": "^30",
@@ -22,11 +24,16 @@
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1084.0",
+    "@aws-sdk/client-s3": "^3.1086.0",
     "@aws-sdk/client-sqs": "^3.1084.0",
     "@aws-sdk/client-ssm": "^3.1084.0",
     "@aws-sdk/lib-dynamodb": "^3.1084.0",
+    "@aws-sdk/s3-request-presigner": "^3.1086.0",
     "aws-cdk-lib": "^2.260.0",
+    "aws-jwt-verify": "^5.2.1",
     "bcryptjs": "^3.0.3",
-    "constructs": "^10.5.0"
+    "constructs": "^10.5.0",
+    "jsonwebtoken": "^9.0.3",
+    "web-push": "^3.6.7"
   }
 }

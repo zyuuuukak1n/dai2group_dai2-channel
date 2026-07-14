@@ -4,7 +4,9 @@ import { validateThreadCreation, ValidationError } from '../core/validation';
 import { generateDailyId, hashIp, generateTrip, hashDeleteKey } from '../core/crypto';
 import { calculateMomentum } from '../core/momentum';
 import { sanitizeHtml } from '../core/sanitize';
+import crypto from 'crypto';
 import { createThreadWithFirstPost, ThreadMetadata } from '../repositories/threadRepository';
+import { incrementStat } from '../repositories/statsRepository';
 import { config } from '../config';
 
 const sqsClient = new SQSClient({});
@@ -43,6 +45,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     const sanitizedBody = sanitizeHtml(body.body);
     const sanitizedTitle = sanitizeHtml(body.title);
+    const editToken = crypto.randomUUID();
 
     const metadata: ThreadMetadata = {
       threadId,
@@ -51,6 +54,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       momentumScore: calculateMomentum(1, now),
       createdAt: now,
       lastUpdatedAt: now,
+      editToken,
+      ...(body.tagId ? { tagId: sanitizeHtml(body.tagId) } : {})
     };
 
     const postItem = {
@@ -65,9 +70,11 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       IsDeleted: false,
       IPHash: ipHash,
       ...(deleteKeyHash ? { DeleteKeyHash: deleteKeyHash } : {}),
+      ...(body.mediaUrl ? { MediaUrl: body.mediaUrl } : {}),
     };
 
     await createThreadWithFirstPost(metadata, postItem);
+    await incrementStat('THREAD');
 
     // Send SQS Message
     if (config.queueUrl) {
@@ -80,7 +87,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     return {
       statusCode: 201,
       headers: { 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({ threadId, postId, message: 'スレッドを作成しました。' }),
+      body: JSON.stringify({ threadId, postId, editToken, message: 'スレッドを作成しました。' }),
     };
 
   } catch (error) {

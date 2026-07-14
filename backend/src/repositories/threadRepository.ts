@@ -1,4 +1,4 @@
-import { QueryCommand, TransactWriteCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { QueryCommand, TransactWriteCommand, GetCommand, BatchGetCommand } from '@aws-sdk/lib-dynamodb';
 import { docClient, getTableName } from './dbClient';
 
 export interface ThreadMetadata {
@@ -8,6 +8,8 @@ export interface ThreadMetadata {
   momentumScore: number;
   createdAt: string;
   lastUpdatedAt: string;
+  tagId?: string;
+  editToken?: string;
 }
 
 export async function createThreadWithFirstPost(
@@ -29,6 +31,8 @@ export async function createThreadWithFirstPost(
     MomentumScore: metadata.momentumScore,
     CreatedAt: metadata.createdAt,
     LastUpdatedAt: metadata.lastUpdatedAt,
+    ...(metadata.tagId ? { TagId: metadata.tagId, GSI3PK: `TAG#${metadata.tagId}`, GSI3SK: `LATEST#${metadata.lastUpdatedAt}` } : {}),
+    ...(metadata.editToken ? { EditToken: metadata.editToken } : {})
   };
 
   const command = new TransactWriteCommand({
@@ -53,7 +57,7 @@ export async function createThreadWithFirstPost(
   await docClient.send(command);
 }
 
-export async function getThreads(sort: 'momentum' | 'latest', limit: number, cursor?: string) {
+export async function getThreads(sort: 'momentum' | 'latest', limit: number, cursor?: string, tagId?: string) {
   const tableName = getTableName();
   
   let exclusiveStartKey: any = undefined;
@@ -66,28 +70,63 @@ export async function getThreads(sort: 'momentum' | 'latest', limit: number, cur
   }
 
   const isMomentum = sort === 'momentum';
+  let indexName = 'GSI1';
+  let keyCondition = 'GSI1PK = :pk';
+  let expressionValues: any = { ':pk': 'BOARD#MAIN' };
+
+  if (tagId) {
+    indexName = 'GSI3';
+    keyCondition = 'GSI3PK = :pk';
+    expressionValues = { ':pk': `TAG#${tagId}` };
+  }
+
   const command = new QueryCommand({
     TableName: tableName,
-    IndexName: 'GSI1',
-    KeyConditionExpression: 'GSI1PK = :pk',
-    ExpressionAttributeValues: {
-      ':pk': 'BOARD#MAIN',
-    },
+    IndexName: indexName,
+    KeyConditionExpression: keyCondition,
+    ExpressionAttributeValues: expressionValues,
     ScanIndexForward: false, // Descending
     Limit: limit,
     ExclusiveStartKey: exclusiveStartKey,
   });
 
   const response = await docClient.send(command);
+  const items = response.Items || [];
+
+  // BatchGet to fetch missing fields (TagId) for GSI1/GSI2 if not available
+  const fullItemsMap = new Map();
+  if (items.length > 0) {
+    const chunks = [];
+    for (let i = 0; i < items.length; i += 100) {
+      chunks.push(items.slice(i, i + 100));
+    }
+    for (const chunk of chunks) {
+      const keys = chunk.map(i => ({ PK: i.PK, SK: 'METADATA' }));
+      const batchRes = await docClient.send(new BatchGetCommand({
+        RequestItems: {
+          [tableName]: { Keys: keys }
+        }
+      }));
+      const fetchedItems = batchRes.Responses?.[tableName] || [];
+      for (const item of fetchedItems) {
+        fullItemsMap.set(item.PK, item);
+      }
+    }
+  }
   
-  const threads = (response.Items || []).map(item => ({
-    threadId: item.PK,
-    title: item.Title,
-    resCount: item.ResCount,
-    momentumScore: item.MomentumScore,
-    createdAt: item.CreatedAt,
-    lastUpdatedAt: item.LastUpdatedAt,
-  }));
+  const threads = items.map(item => {
+    const fullItem = fullItemsMap.get(item.PK) || item;
+    return {
+      threadId: item.PK,
+      title: item.Title,
+      resCount: item.ResCount,
+      momentumScore: item.MomentumScore,
+      createdAt: item.CreatedAt,
+      lastUpdatedAt: item.LastUpdatedAt,
+      tagId: fullItem.TagId,
+      likeCount: item.LikeCount || 0,
+    };
+  });
 
   let nextCursor: string | null = null;
   if (response.LastEvaluatedKey) {
@@ -102,7 +141,7 @@ export async function getThreads(sort: 'momentum' | 'latest', limit: number, cur
   return { threads, nextCursor };
 }
 
-export async function getThreadsLatest(limit: number, cursor?: string) {
+export async function getThreadsLatest(limit: number, cursor?: string, tagId?: string) {
   const tableName = getTableName();
   
   let exclusiveStartKey: any = undefined;
@@ -114,28 +153,62 @@ export async function getThreadsLatest(limit: number, cursor?: string) {
     }
   }
 
+  let indexName = 'GSI2';
+  let keyCondition = 'GSI2PK = :pk';
+  let expressionValues: any = { ':pk': 'BOARD#MAIN' };
+
+  if (tagId) {
+    indexName = 'GSI3';
+    keyCondition = 'GSI3PK = :pk';
+    expressionValues = { ':pk': `TAG#${tagId}` };
+  }
+
   const command = new QueryCommand({
     TableName: tableName,
-    IndexName: 'GSI2',
-    KeyConditionExpression: 'GSI2PK = :pk',
-    ExpressionAttributeValues: {
-      ':pk': 'BOARD#MAIN',
-    },
+    IndexName: indexName,
+    KeyConditionExpression: keyCondition,
+    ExpressionAttributeValues: expressionValues,
     ScanIndexForward: false, // Descending
     Limit: limit,
     ExclusiveStartKey: exclusiveStartKey,
   });
 
   const response = await docClient.send(command);
+  const items = response.Items || [];
+
+  const fullItemsMap = new Map();
+  if (items.length > 0) {
+    const chunks = [];
+    for (let i = 0; i < items.length; i += 100) {
+      chunks.push(items.slice(i, i + 100));
+    }
+    for (const chunk of chunks) {
+      const keys = chunk.map(i => ({ PK: i.PK, SK: 'METADATA' }));
+      const batchRes = await docClient.send(new BatchGetCommand({
+        RequestItems: {
+          [tableName]: { Keys: keys }
+        }
+      }));
+      const fetchedItems = batchRes.Responses?.[tableName] || [];
+      for (const item of fetchedItems) {
+        fullItemsMap.set(item.PK, item);
+      }
+    }
+  }
   
-  const threads = (response.Items || []).map(item => ({
-    threadId: item.PK,
-    title: item.Title,
-    resCount: item.ResCount,
-    momentumScore: item.MomentumScore,
-    createdAt: item.CreatedAt,
-    lastUpdatedAt: item.LastUpdatedAt,
-  }));
+  const threads = items.map(item => {
+    const fullItem = fullItemsMap.get(item.PK) || item;
+    return {
+      threadId: item.PK,
+      title: item.Title,
+      resCount: item.ResCount,
+      momentumScore: item.MomentumScore,
+      createdAt: item.CreatedAt,
+      lastUpdatedAt: item.LastUpdatedAt,
+      tagId: fullItem.TagId,
+      likeCount: item.LikeCount || 0,
+    };
+  });
 
   let nextCursor: string | null = null;
   if (response.LastEvaluatedKey) {
@@ -164,5 +237,7 @@ export async function getThreadById(threadId: string) {
     momentumScore: response.Item.MomentumScore,
     createdAt: response.Item.CreatedAt,
     lastUpdatedAt: response.Item.LastUpdatedAt,
+    tagId: response.Item.TagId,
+    likeCount: response.Item.LikeCount || 0,
   };
 }
