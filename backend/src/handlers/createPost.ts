@@ -9,14 +9,17 @@ import { config } from '../config';
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   try {
-    const threadId = event.pathParameters?.threadId;
-    if (!threadId) {
+    const rawThreadId = event.pathParameters?.threadId;
+    if (!rawThreadId) {
       return {
         statusCode: 400,
         headers: { 'Access-Control-Allow-Origin': '*' },
         body: JSON.stringify({ error: { code: 'INVALID_PARAMETER', message: 'Thread ID is required' } }),
       };
     }
+    
+    // API Gatewayから来たIDに thread# が付いていない場合は付与する
+    const threadId = rawThreadId.startsWith('thread#') ? rawThreadId : `thread#${rawThreadId.replace(/^thread%23/, '')}`;
 
     const body = JSON.parse(event.body || '{}');
     validatePostCreation(body);

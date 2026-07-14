@@ -5,7 +5,8 @@ import { fetcher, createPost } from '../lib/api';
 
 export default function ThreadDetailPage() {
   const { threadId } = useParams<{ threadId: string }>();
-  const { data, error, mutate } = useSWR(`/threads/thread%23${threadId}`, fetcher, {
+  // 以前は thread%23 を付けていたが、バックエンド側で吸収するように変更したためそのまま送る
+  const { data, error, mutate } = useSWR(`/threads/${threadId}`, fetcher, {
     refreshInterval: 10000, // 10秒間隔のポーリング
   });
 
@@ -48,7 +49,7 @@ export default function ThreadDetailPage() {
     );
 
     try {
-      await createPost(`thread#${threadId}`, { authorName, mail, body });
+      await createPost(threadId || '', { authorName, mail, body });
       setAuthorName('');
       setMail('');
       setBody('');
@@ -80,34 +81,30 @@ export default function ThreadDetailPage() {
   return (
     <div className="flex flex-col gap-8">
       <div className="mb-4">
-        <Link to="/" style={{ color: 'var(--primary-color)', textDecoration: 'none' }}>
-          ← スレッド一覧に戻る
+        <Link to="/">
+          ■掲示板に戻る■
         </Link>
       </div>
 
       {/* Thread Header */}
-      <div className="glass-panel" style={{ borderLeft: '4px solid var(--primary-color)' }}>
-        <h2 style={{ fontSize: '1.5rem', marginBottom: '8px' }}>{thread.title}</h2>
-        <div className="flex gap-4 text-sm text-muted">
-          <span>レス数: {thread.resCount}</span>
-          <span>勢い: {thread.momentumScore}</span>
-        </div>
+      <div>
+        <h2 style={{ fontSize: '20px', color: '#CC0000', margin: '15px 0' }}>{thread.title}</h2>
       </div>
 
       {/* Posts */}
       <div className="flex flex-col gap-4">
         {posts.map((post: any) => (
-          <div key={post.postId} className="glass-panel" style={{ padding: '16px' }}>
-            <div className="flex gap-2 items-center text-sm mb-2 pb-2" style={{ borderBottom: '1px solid var(--surface-border)' }}>
-              <span style={{ fontWeight: 'bold' }}>{post.number}</span>
-              <span style={{ color: 'var(--success-color)' }}>{post.authorName}</span>
-              {post.trip && <span style={{ color: 'var(--accent-color)' }}>{post.trip}</span>}
-              <span className="text-muted">{new Date(post.createdAt).toLocaleString('ja-JP')}</span>
-              <span style={{ color: 'var(--secondary-color)', fontSize: '0.75rem', background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: '4px' }}>
+          <div key={post.postId} style={{ marginBottom: '15px' }}>
+            <div className="text-sm mb-2">
+              <span style={{ fontWeight: 'normal' }}>{post.number} ：</span>
+              <span style={{ color: 'green', fontWeight: 'bold' }}>{post.authorName}</span>
+              {post.trip && <span style={{ color: 'green' }}>{post.trip}</span>}
+              <span className="text-muted"> ：{new Date(post.createdAt).toLocaleString('ja-JP')} </span>
+              <span style={{ color: '#666', fontSize: '12px' }}>
                 ID:{post.dailyId}
               </span>
             </div>
-            <div style={{ wordBreak: 'break-word', color: post.isDeleted ? 'var(--text-muted)' : 'var(--text-main)' }}>
+            <div style={{ wordBreak: 'break-word', color: post.isDeleted ? '#999' : '#000', marginLeft: '30px' }}>
               {renderBody(post.body)}
             </div>
           </div>
@@ -115,36 +112,37 @@ export default function ThreadDetailPage() {
       </div>
 
       {/* Post Form */}
-      <div className="glass-panel mt-4">
-        <h3 className="mb-4">💬 書き込む</h3>
-        <form onSubmit={handlePost} className="flex flex-col gap-4">
-          <div className="flex gap-4">
+      <div className="mt-4" style={{ borderTop: '1px solid #ccc', paddingTop: '15px' }}>
+        <form onSubmit={handlePost} className="flex flex-col gap-2">
+          <div className="flex gap-2 text-sm items-center">
+            名前：
             <input
               type="text"
-              placeholder="名前 (任意)"
               value={authorName}
               onChange={(e) => setAuthorName(e.target.value)}
               maxLength={30}
+              style={{ width: '120px' }}
             />
+            E-mail (省略可)：
             <input
               type="text"
-              placeholder="メール (任意, sage等)"
               value={mail}
               onChange={(e) => setMail(e.target.value)}
               maxLength={30}
+              style={{ width: '120px' }}
             />
+            <button type="submit" className="btn" disabled={isSubmitting}>
+              {isSubmitting ? '書き込み中...' : '書き込む'}
+            </button>
           </div>
           <textarea
-            placeholder="本文 (必須, 2000文字以内)"
             value={body}
             onChange={(e) => setBody(e.target.value)}
             required
             maxLength={2000}
+            style={{ width: '400px', height: '100px', minHeight: '100px' }}
           />
           {submitError && <div className="error-text">{submitError}</div>}
-          <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
-            {isSubmitting ? <div className="spinner" /> : '書き込む'}
-          </button>
         </form>
       </div>
     </div>

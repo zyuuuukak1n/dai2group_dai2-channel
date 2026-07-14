@@ -40,57 +40,61 @@ export default function ThreadListPage() {
         <form onSubmit={handleCreateThread} className="flex flex-col gap-4">
           <input
             type="text"
-            placeholder="スレッドタイトル (必須, 60文字以内)"
+            placeholder="スレッドタイトル"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             required
             maxLength={60}
+            style={{ width: '400px', display: 'block' }}
           />
-          <div className="flex gap-4">
+          <div className="flex gap-2 text-sm items-center">
+            名前：
             <input
               type="text"
-              placeholder="名前 (任意)"
               value={authorName}
               onChange={(e) => setAuthorName(e.target.value)}
               maxLength={30}
+              style={{ width: '120px' }}
             />
+            E-mail (省略可)：
             <input
               type="text"
-              placeholder="メール (任意, sage等)"
               value={mail}
               onChange={(e) => setMail(e.target.value)}
               maxLength={30}
+              style={{ width: '120px' }}
             />
           </div>
           <textarea
-            placeholder="本文 (必須, 2000文字以内)"
             value={body}
             onChange={(e) => setBody(e.target.value)}
             required
             maxLength={2000}
           />
           {submitError && <div className="error-text">{submitError}</div>}
-          <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
-            {isSubmitting ? <div className="spinner" /> : 'スレッドを立てる'}
-          </button>
+          <div>
+            <button type="submit" className="btn" disabled={isSubmitting}>
+              {isSubmitting ? '処理中...' : '新規スレッド作成'}
+            </button>
+          </div>
         </form>
       </div>
 
       {/* Thread List */}
       <div className="glass-panel">
         <div className="flex justify-between items-center mb-4">
-          <h2>スレッド一覧</h2>
+          <h2>■ スレッド一覧</h2>
           <div className="flex gap-2">
             <button 
-              className={`btn ${sort === 'momentum' ? 'btn-primary' : ''}`}
-              style={{ padding: '6px 12px', opacity: sort === 'momentum' ? 1 : 0.6 }}
+              className="btn"
+              style={{ fontWeight: sort === 'momentum' ? 'bold' : 'normal' }}
               onClick={() => setSort('momentum')}
             >
               勢い順
             </button>
             <button 
-              className={`btn ${sort === 'latest' ? 'btn-primary' : ''}`}
-              style={{ padding: '6px 12px', opacity: sort === 'latest' ? 1 : 0.6 }}
+              className="btn"
+              style={{ fontWeight: sort === 'latest' ? 'bold' : 'normal' }}
               onClick={() => setSort('latest')}
             >
               新着順
@@ -107,18 +111,15 @@ export default function ThreadListPage() {
               <Link 
                 to={`/threads/${thread.threadId.replace('thread#', '')}`} 
                 key={thread.threadId}
-                style={{ textDecoration: 'none', color: 'inherit' }}
+                style={{ textDecoration: 'none', color: '#000' }}
               >
-                <div style={{ padding: '16px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', transition: 'all 0.2s ease' }}
-                     onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-                     onMouseOut={(e) => e.currentTarget.style.background = 'rgba(0,0,0,0.2)'}>
-                  <h3 style={{ marginBottom: '8px', color: 'var(--primary-color)' }}>
+                <div style={{ marginBottom: '8px' }}>
+                  <span style={{ color: '#0000EE', textDecoration: 'underline' }}>
                     {index + 1}: {thread.title} ({thread.resCount})
-                  </h3>
-                  <div className="flex gap-4 text-xs text-muted">
-                    <span>勢い: {thread.momentumScore}</span>
-                    <span>最終更新: {new Date(thread.lastUpdatedAt).toLocaleString('ja-JP')}</span>
-                  </div>
+                  </span>
+                  <span className="text-xs text-muted" style={{ marginLeft: '10px' }}>
+                    [勢い: {thread.momentumScore} / {new Date(thread.lastUpdatedAt).toLocaleString('ja-JP')}]
+                  </span>
                 </div>
               </Link>
             ))}
