@@ -329,6 +329,11 @@ export class BackendStack extends cdk.Stack {
     }));
     createPostLambda.addEnvironment('WEBSOCKET_ENDPOINT', webSocketStage.callbackUrl);
 
+    new cdk.CfnOutput(this, 'WebSocketApiEndpoint', {
+      value: webSocketStage.callbackUrl.replace('https://', 'wss://'),
+      description: 'WebSocket API Endpoint URL',
+    });
+
     // API Resources
     const threadsResource = api.root.addResource('threads');
     threadsResource.addMethod('GET', new apigateway.LambdaIntegration(getThreadsLambda));
@@ -368,5 +373,10 @@ export class BackendStack extends cdk.Stack {
 
     const mediaResource = api.root.addResource('media');
     mediaResource.addResource('presigned').addMethod('GET', new apigateway.LambdaIntegration(generatePresignedUrlLambda));
+
+    new cdk.CfnOutput(this, 'RestApiEndpoint', {
+      value: api.url,
+      description: 'REST API Endpoint URL',
+    });
   }
 }
