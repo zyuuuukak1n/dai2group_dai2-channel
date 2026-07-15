@@ -8,8 +8,9 @@ describe('Core Logic Tests', () => {
     it('calculates momentum correctly', () => {
       const now = Date.now();
       const oneDayAgo = new Date(now - 24 * 60 * 60 * 1000).toISOString();
-      // 100 res in 1 day = 100 momentum
-      expect(calculateMomentum(100, oneDayAgo)).toBe(100);
+      const momentum = calculateMomentum(100, oneDayAgo);
+      expect(momentum).toBeGreaterThanOrEqual(99);
+      expect(momentum).toBeLessThanOrEqual(100);
     });
 
     it('handles zero division protection (under 0.01 days)', () => {

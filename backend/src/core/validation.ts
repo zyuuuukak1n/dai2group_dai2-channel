@@ -20,7 +20,7 @@ const ThreadCreationSchema = z.object({
 export function validateThreadCreation(input: any) {
   const result = ThreadCreationSchema.safeParse(input);
   if (!result.success) {
-    throw new ValidationError(result.error.errors[0].message);
+    throw new ValidationError(result.error?.issues?.[0]?.message || 'Validation failed');
   }
 }
 
@@ -36,6 +36,6 @@ const PostCreationSchema = z.object({
 export function validatePostCreation(input: any) {
   const result = PostCreationSchema.safeParse(input);
   if (!result.success) {
-    throw new ValidationError(result.error.errors[0].message);
+    throw new ValidationError(result.error?.issues?.[0]?.message || 'Validation failed');
   }
 }

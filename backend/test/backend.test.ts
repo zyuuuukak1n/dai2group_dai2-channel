@@ -1,6 +1,7 @@
 // import * as cdk from 'aws-cdk-lib/core';
 // import { Template } from 'aws-cdk-lib/assertions';
 // import * as Backend from '../lib/backend-stack';
+import { test } from 'vitest';
 
 // example test. To run these tests, uncomment this file along with the
 // example resource in lib/backend-stack.ts
