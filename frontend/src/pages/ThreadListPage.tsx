@@ -3,6 +3,7 @@ import useSWR from 'swr';
 import { Link } from 'react-router-dom';
 import { fetcher, createThread } from '../lib/api';
 import MediaUpload from '../components/MediaUpload';
+import { useNGFilter } from '../features/moderation/useNGFilter';
 
 export default function ThreadListPage() {
   const [sort, setSort] = useState<'momentum' | 'latest'>('momentum');
@@ -21,6 +22,7 @@ export default function ThreadListPage() {
   const [submitError, setSubmitError] = useState('');
 
   const { data: tagsData } = useSWR('/tags', fetcher);
+  const { isThreadHidden } = useNGFilter();
 
   const handleCreateThread = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -151,7 +153,7 @@ export default function ThreadListPage() {
         
         {data?.threads && (
           <div className="flex flex-col gap-4">
-            {data.threads.map((thread: any, index: number) => (
+            {data.threads.filter((t: any) => !isThreadHidden(t)).map((thread: any, index: number) => (
               <Link 
                 to={`/threads/${thread.threadId.replace('thread#', '')}`} 
                 key={thread.threadId}
@@ -174,8 +176,9 @@ export default function ThreadListPage() {
       </div>
 
       {/* Footer Links */}
-      <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '12px' }}>
-        <Link to="/terms" style={{ marginRight: '15px' }}>利用規約</Link>
+      <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '12px', display: 'flex', justifyContent: 'center', gap: '15px' }}>
+        <Link to="/ng-settings">NG設定</Link>
+        <Link to="/terms">利用規約</Link>
         <Link to="/contact">お問い合わせ</Link>
       </div>
     </div>

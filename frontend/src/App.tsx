@@ -13,6 +13,7 @@ import SignUpPage from './pages/SignUpPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import MyPage from './pages/MyPage';
 import HelpPage from './pages/HelpPage';
+import NGSettingsPage from './pages/NGSettingsPage';
 import { configureAmplify, checkIsAdmin } from './lib/auth';
 import { apiFetch } from './lib/api';
 import useSWR from 'swr';
@@ -69,6 +70,7 @@ function App() {
           <Route path="/mypage" element={<MyPage />} />
           <Route path="/support/ticket/:ticketId" element={<TicketDetailPage />} />
           <Route path="/admin/*" element={<AdminLayout />} />
+          <Route path="/ng-settings" element={<NGSettingsPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>

@@ -57,9 +57,12 @@ export async function createPost(
 
   const updateExprParts = [
     'ResCount = :newResCount',
+    'Version = :newVersion'
   ];
   const exprAttrValues: any = {
     ':newResCount': metadata.resCount,
+    ':newVersion': metadata.version + 1,
+    ':currentVersion': metadata.version
   };
 
   if (!isSage) {
@@ -95,7 +98,7 @@ export async function createPost(
           },
           UpdateExpression: updateExpression,
           ExpressionAttributeValues: exprAttrValues,
-          ConditionExpression: 'attribute_exists(PK)', // Ensure thread exists
+          ConditionExpression: 'attribute_exists(PK) AND (attribute_not_exists(Version) OR Version = :currentVersion)', 
         },
       },
     ],

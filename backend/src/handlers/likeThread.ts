@@ -1,6 +1,6 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { hashIp } from '../core/crypto';
-import { config } from '../config';
+import { getConfig } from '../config';
 import { docClient, getTableName } from '../repositories/dbClient';
 import { TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 
@@ -16,6 +16,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
     const threadId = rawThreadId.startsWith('thread#') ? rawThreadId : `thread#${rawThreadId.replace(/^thread%23/, '')}`;
     const clientIp = event.requestContext.identity.sourceIp || '127.0.0.1';
+    const config = await getConfig();
     const ipHash = hashIp(clientIp, config.ipHashSalt);
 
     const tableName = getTableName();

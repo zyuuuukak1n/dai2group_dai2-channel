@@ -7,8 +7,11 @@ import { getThreadById } from '../repositories/threadRepository';
 import { createPost } from '../repositories/postRepository';
 import { getGlobalPushSubscription, getThreadSubscribers } from '../repositories/extendedRepository';
 import { incrementStat } from '../repositories/statsRepository';
-import { config } from '../config';
+import { getConfig } from '../config';
+import { checkAndLockIdempotencyKey } from '../repositories/idempotencyRepository';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { ApiGatewayManagementApiClient, PostToConnectionCommand } from '@aws-sdk/client-apigatewaymanagementapi';
+import { getConnectionsByThreadId, removeConnection } from '../repositories/wsConnectionRepository';
 import * as webpush from 'web-push';
 
 const ssm = new SSMClient({});
@@ -41,7 +44,27 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const body = JSON.parse(event.body || '{}');
     validatePostCreation(body);
 
-    const thread = await getThreadById(threadId);
+    const idempotencyKey = event.headers['idempotency-key'] || event.headers['Idempotency-Key'];
+    if (idempotencyKey) {
+      const locked = await checkAndLockIdempotencyKey(idempotencyKey);
+      if (!locked) {
+        return {
+          statusCode: 409,
+          headers: { 'Access-Control-Allow-Origin': '*' },
+          body: JSON.stringify({ error: { code: 'CONFLICT', message: '重複リクエストです。' } }),
+        };
+      }
+    }
+
+    let retries = 3;
+    let success = false;
+    let newResCount = 0;
+    let thread: any;
+    let finalPostItem: any = null;
+    const config = await getConfig();
+
+    while (retries > 0 && !success) {
+      thread = await getThreadById(threadId);
     if (!thread) {
       return {
         statusCode: 404,
@@ -80,34 +103,50 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const sanitizedBody = sanitizeHtml(body.body);
     const isSage = body.mail && body.mail.toLowerCase() === 'sage';
 
-    const newMomentum = isSage 
-      ? thread.momentumScore 
-      : calculateMomentum(newResCount, thread.createdAt);
+      const newMomentum = isSage 
+        ? thread.momentumScore 
+        : calculateMomentum(newResCount, thread.createdAt);
 
-    const postItem = {
-      PK: threadId,
-      SK: postId,
-      Number: newResCount,
-      AuthorName: authorName,
-      ...(trip ? { Trip: trip } : {}),
-      DailyID: dailyId,
-      Body: sanitizedBody,
-      CreatedAt: now,
-      IsDeleted: false,
-      IPHash: ipHash,
-      ...(deleteKeyHash ? { DeleteKeyHash: deleteKeyHash } : {}),
-      ...(body.mediaUrl ? { MediaUrl: body.mediaUrl } : {}),
-      ...(body.deviceId ? { DeviceId: body.deviceId } : {}),
-    };
+      const postItem = {
+        PK: threadId,
+        SK: postId,
+        Number: newResCount,
+        AuthorName: authorName,
+        ...(trip ? { Trip: trip } : {}),
+        DailyID: dailyId,
+        Body: sanitizedBody,
+        CreatedAt: now,
+        IsDeleted: false,
+        IPHash: ipHash,
+        ...(deleteKeyHash ? { DeleteKeyHash: deleteKeyHash } : {}),
+        ...(body.mediaUrl ? { MediaUrl: body.mediaUrl } : {}),
+        ...(body.deviceId ? { DeviceId: body.deviceId } : {}),
+      };
 
-    const updatedMetadata = {
-      ...thread,
-      resCount: newResCount,
-      momentumScore: newMomentum,
-      lastUpdatedAt: isSage ? thread.lastUpdatedAt : now,
-    };
+      const updatedMetadata = {
+        ...thread,
+        resCount: newResCount,
+        momentumScore: newMomentum,
+        lastUpdatedAt: isSage ? thread.lastUpdatedAt : now,
+      };
 
-    await createPost(updatedMetadata, postItem, isSage);
+      try {
+        await createPost(updatedMetadata, postItem, isSage);
+        finalPostItem = postItem;
+        success = true;
+      } catch (err: any) {
+        if (err.name === 'TransactionCanceledException' && err.message.includes('ConditionalCheckFailed')) {
+          retries--;
+          if (retries === 0) {
+            throw new Error('Concurrent modification failed after retries.');
+          }
+          // continue loop to retry
+        } else {
+          throw err;
+        }
+      }
+    }
+
     await incrementStat('POST');
 
     // --- PUSH NOTIFICATION LOGIC ---
@@ -160,6 +199,45 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
             console.error('Push notification failed for devId:', devId, e);
           }
         }
+      }
+    }
+
+    // --- WEBSOCKET BROADCAST LOGIC ---
+    if (process.env.WEBSOCKET_ENDPOINT && finalPostItem) {
+      try {
+        const apigw = new ApiGatewayManagementApiClient({ endpoint: process.env.WEBSOCKET_ENDPOINT.replace('wss://', 'https://') });
+        const connections = await getConnectionsByThreadId(threadId);
+        
+        const message = JSON.stringify({
+          type: 'NEW_POST',
+          post: {
+            postId: finalPostItem.SK,
+            number: finalPostItem.Number,
+            authorName: finalPostItem.AuthorName,
+            trip: finalPostItem.Trip,
+            dailyId: finalPostItem.DailyID,
+            body: finalPostItem.Body,
+            createdAt: finalPostItem.CreatedAt,
+            mediaUrl: finalPostItem.MediaUrl,
+            isDeleted: finalPostItem.IsDeleted
+          }
+        });
+
+        const postPromises = connections.map(async (connectionId) => {
+          try {
+            await apigw.send(new PostToConnectionCommand({
+              ConnectionId: connectionId,
+              Data: Buffer.from(message)
+            }));
+          } catch (e: any) {
+            if (e.$metadata?.httpStatusCode === 410) {
+              await removeConnection(connectionId);
+            }
+          }
+        });
+        await Promise.all(postPromises);
+      } catch(e) {
+        console.error('WebSocket setup error', e);
       }
     }
 

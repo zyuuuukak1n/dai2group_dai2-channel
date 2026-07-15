@@ -11,6 +11,8 @@ import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
+import * as integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 
 export class BackendStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -53,20 +55,54 @@ export class BackendStack extends cdk.Stack {
       nonKeyAttributes: ['Title', 'ResCount', 'MomentumScore', 'LastUpdatedAt', 'CreatedAt'],
     });
 
+    // DLQ for X notifications
+    const dlq = new sqs.Queue(this, `${envPrefix}NewThreadDLQ`, {
+      queueName: `${envPrefix}Dai2ChannelNewThreadDLQ`,
+      retentionPeriod: cdk.Duration.days(14),
+    });
+
     // SQS Queue for X notifications
     const newThreadQueue = new sqs.Queue(this, `${envPrefix}NewThreadQueue`, {
       queueName: `${envPrefix}Dai2ChannelNewThreadQueue`,
+      deadLetterQueue: {
+        maxReceiveCount: 3,
+        queue: dlq,
+      },
+    });
+
+    // Idempotency Store Table
+    const idempotencyTable = new dynamodb.Table(this, `${envPrefix}IdempotencyStore`, {
+      tableName: `${envPrefix}Dai2ChannelIdempotency`,
+      partitionKey: { name: 'IdempotencyKey', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      timeToLiveAttribute: 'ExpiresAt',
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+    });
+
+    // Connections Table for WebSocket
+    const connectionsTable = new dynamodb.Table(this, `${envPrefix}ConnectionsTable`, {
+      tableName: `${envPrefix}Dai2ChannelConnections`,
+      partitionKey: { name: 'ConnectionId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      timeToLiveAttribute: 'ExpiresAt',
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+    });
+    connectionsTable.addGlobalSecondaryIndex({
+      indexName: 'GSI1',
+      partitionKey: { name: 'ThreadId', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.KEYS_ONLY,
     });
 
     // Lambda Environment Variables
     const lambdaEnv: Record<string, string> = {
       TABLE_NAME: table.tableName,
+      IDEMPOTENCY_TABLE_NAME: idempotencyTable.tableName,
+      CONNECTIONS_TABLE_NAME: connectionsTable.tableName,
       QUEUE_URL: newThreadQueue.queueUrl,
-      // We will reference the names of the SSM parameters here so the lambda can fetch them at runtime if needed,
-      // but for simplicity we can also pass plain text salts as env vars for now.
-      IP_HASH_SALT: 'ip-hash-salt-placeholder-replace-me',
-      DAILY_ID_SALT: 'daily-id-salt-placeholder-replace-me',
-      TRIP_SALT: 'trip-salt-placeholder-replace-me',
+      // Parameter Store Keys
+      IP_HASH_SALT_PARAM: '/dai2channel/salt/ipHash',
+      DAILY_ID_SALT_PARAM: '/dai2channel/salt/dailyId',
+      TRIP_SALT_PARAM: '/dai2channel/salt/trip',
     };
 
     // S3 Bucket for Media Uploads
@@ -77,7 +113,7 @@ export class BackendStack extends cdk.Stack {
       cors: [
         {
           allowedMethods: [s3.HttpMethods.PUT, s3.HttpMethods.POST, s3.HttpMethods.GET],
-          allowedOrigins: ['*'], // In production, restrict to domain
+          allowedOrigins: process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : ['http://localhost:5173'],
           allowedHeaders: ['*'],
         },
       ],
@@ -191,6 +227,21 @@ export class BackendStack extends cdk.Stack {
       ...defaultNodejsProps,
     });
 
+    const wsConnectLambda = new nodejs.NodejsFunction(this, `${envPrefix}WsConnectFn`, {
+      entry: 'src/handlers/wsConnect.ts',
+      ...defaultNodejsProps,
+    });
+
+    const wsDisconnectLambda = new nodejs.NodejsFunction(this, `${envPrefix}WsDisconnectFn`, {
+      entry: 'src/handlers/wsDisconnect.ts',
+      ...defaultNodejsProps,
+    });
+
+    const wsDefaultLambda = new nodejs.NodejsFunction(this, `${envPrefix}WsDefaultFn`, {
+      entry: 'src/handlers/wsDefault.ts',
+      ...defaultNodejsProps,
+    });
+
     // Grant Permissions
     table.grantReadWriteData(createThreadLambda);
     table.grantReadData(getThreadsLambda);
@@ -203,6 +254,13 @@ export class BackendStack extends cdk.Stack {
     table.grantReadWriteData(adminLambda);
     table.grantReadWriteData(extendedLambda);
 
+    idempotencyTable.grantReadWriteData(createThreadLambda);
+    idempotencyTable.grantReadWriteData(createPostLambda);
+
+    connectionsTable.grantReadWriteData(wsConnectLambda);
+    connectionsTable.grantReadWriteData(wsDisconnectLambda);
+    connectionsTable.grantReadData(createPostLambda);
+
     mediaBucket.grantPut(generatePresignedUrlLambda);
 
     const ssmPolicy = new cdk.aws_iam.PolicyStatement({
@@ -211,6 +269,7 @@ export class BackendStack extends cdk.Stack {
     });
     adminLambda.addToRolePolicy(ssmPolicy);
     createPostLambda.addToRolePolicy(ssmPolicy);
+    createThreadLambda.addToRolePolicy(ssmPolicy);
 
     newThreadQueue.grantSendMessages(createThreadLambda);
     
@@ -232,9 +291,9 @@ export class BackendStack extends cdk.Stack {
     const api = new apigateway.RestApi(this, `${envPrefix}Dai2ChannelApi`, {
       restApiName: `${envPrefix} Dai2 Channel API`,
       defaultCorsPreflightOptions: {
-        allowOrigins: apigateway.Cors.ALL_ORIGINS,
+        allowOrigins: process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : apigateway.Cors.ALL_ORIGINS,
         allowMethods: apigateway.Cors.ALL_METHODS,
-        allowHeaders: ['Content-Type', 'X-Amz-Date', 'Authorization', 'X-Api-Key', 'X-Amz-Security-Token'],
+        allowHeaders: ['Content-Type', 'X-Amz-Date', 'Authorization', 'X-Api-Key', 'X-Amz-Security-Token', 'Idempotency-Key'],
       },
     });
 
@@ -249,6 +308,26 @@ export class BackendStack extends cdk.Stack {
     plan.addApiStage({
       stage: api.deploymentStage,
     });
+
+    // API Resources
+    const webSocketApi = new apigwv2.WebSocketApi(this, `${envPrefix}WebSocketApi`, {
+      apiName: `${envPrefix} Dai2 Channel WebSocket API`,
+      connectRouteOptions: { integration: new integrations.WebSocketLambdaIntegration('ConnectIntegration', wsConnectLambda) },
+      disconnectRouteOptions: { integration: new integrations.WebSocketLambdaIntegration('DisconnectIntegration', wsDisconnectLambda) },
+      defaultRouteOptions: { integration: new integrations.WebSocketLambdaIntegration('DefaultIntegration', wsDefaultLambda) },
+    });
+    const webSocketStage = new apigwv2.WebSocketStage(this, `${envPrefix}WebSocketStage`, {
+      webSocketApi,
+      stageName: 'prod',
+      autoDeploy: true,
+    });
+
+    const connectionsArn = `arn:aws:execute-api:${this.region}:${this.account}:${webSocketApi.apiId}/prod/*`;
+    createPostLambda.addToRolePolicy(new cdk.aws_iam.PolicyStatement({
+      actions: ['execute-api:ManageConnections'],
+      resources: [connectionsArn],
+    }));
+    createPostLambda.addEnvironment('WEBSOCKET_ENDPOINT', webSocketStage.callbackUrl);
 
     // API Resources
     const threadsResource = api.root.addResource('threads');

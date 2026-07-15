@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 export class ValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -5,35 +7,35 @@ export class ValidationError extends Error {
   }
 }
 
+const ThreadCreationSchema = z.object({
+  title: z.string().min(1, 'タイトルは1文字以上で入力してください。').max(60, 'タイトルは60文字以内で入力してください。'),
+  body: z.string().min(1, '本文は1文字以上で入力してください。').max(2000, '本文は2000文字以内で入力してください。'),
+  authorName: z.string().max(30, '名前は30文字以内で入力してください。').optional().nullable(),
+  password: z.string().max(20, 'パスワードは20文字以内で入力してください。').optional().nullable(),
+  mail: z.string().max(30, 'メールアドレスは30文字以内で入力してください。').optional().nullable(),
+  mediaUrl: z.string().url().optional().nullable(),
+  deviceId: z.string().optional().nullable(),
+});
+
 export function validateThreadCreation(input: any) {
-  if (!input.title || typeof input.title !== 'string' || input.title.length < 1 || input.title.length > 60) {
-    throw new ValidationError('タイトルは1文字以上、60文字以内で入力してください。');
-  }
-  if (!input.body || typeof input.body !== 'string' || input.body.length < 1 || input.body.length > 2000) {
-    throw new ValidationError('本文は1文字以上、2000文字以内で入力してください。');
-  }
-  if (input.authorName && (typeof input.authorName !== 'string' || input.authorName.length > 30)) {
-    throw new ValidationError('名前は30文字以内で入力してください。');
-  }
-  if (input.password && (typeof input.password !== 'string' || input.password.length > 20)) {
-    throw new ValidationError('パスワードは20文字以内で入力してください。');
-  }
-  if (input.mail && (typeof input.mail !== 'string' || input.mail.length > 30)) {
-    throw new ValidationError('メールアドレスは30文字以内で入力してください。');
+  const result = ThreadCreationSchema.safeParse(input);
+  if (!result.success) {
+    throw new ValidationError(result.error.errors[0].message);
   }
 }
 
+const PostCreationSchema = z.object({
+  body: z.string().min(1, '本文は1文字以上で入力してください。').max(2000, '本文は2000文字以内で入力してください。'),
+  authorName: z.string().max(30, '名前は30文字以内で入力してください。').optional().nullable(),
+  password: z.string().max(20, 'パスワードは20文字以内で入力してください。').optional().nullable(),
+  mail: z.string().max(30, 'メールアドレスは30文字以内で入力してください。').optional().nullable(),
+  mediaUrl: z.string().url().optional().nullable(),
+  deviceId: z.string().optional().nullable(),
+});
+
 export function validatePostCreation(input: any) {
-  if (!input.body || typeof input.body !== 'string' || input.body.length < 1 || input.body.length > 2000) {
-    throw new ValidationError('本文は1文字以上、2000文字以内で入力してください。');
-  }
-  if (input.authorName && (typeof input.authorName !== 'string' || input.authorName.length > 30)) {
-    throw new ValidationError('名前は30文字以内で入力してください。');
-  }
-  if (input.password && (typeof input.password !== 'string' || input.password.length > 20)) {
-    throw new ValidationError('パスワードは20文字以内で入力してください。');
-  }
-  if (input.mail && (typeof input.mail !== 'string' || input.mail.length > 30)) {
-    throw new ValidationError('メールアドレスは30文字以内で入力してください。');
+  const result = PostCreationSchema.safeParse(input);
+  if (!result.success) {
+    throw new ValidationError(result.error.errors[0].message);
   }
 }

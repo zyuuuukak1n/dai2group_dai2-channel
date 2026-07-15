@@ -7,7 +7,8 @@ import { sanitizeHtml } from '../core/sanitize';
 import crypto from 'crypto';
 import { createThreadWithFirstPost, ThreadMetadata } from '../repositories/threadRepository';
 import { incrementStat } from '../repositories/statsRepository';
-import { config } from '../config';
+import { getConfig } from '../config';
+import { checkAndLockIdempotencyKey } from '../repositories/idempotencyRepository';
 
 const sqsClient = new SQSClient({});
 
@@ -22,6 +23,20 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     const clientIp = event.requestContext.identity.sourceIp || '127.0.0.1';
     
+    const idempotencyKey = event.headers['idempotency-key'] || event.headers['Idempotency-Key'];
+    if (idempotencyKey) {
+      const locked = await checkAndLockIdempotencyKey(idempotencyKey);
+      if (!locked) {
+        return {
+          statusCode: 409,
+          headers: { 'Access-Control-Allow-Origin': '*' },
+          body: JSON.stringify({ error: { code: 'CONFLICT', message: '重複リクエストです。' } }),
+        };
+      }
+    }
+
+    const config = await getConfig();
+
     // Core Logic
     const dailyId = generateDailyId(clientIp, config.dailyIdSalt);
     const ipHash = hashIp(clientIp, config.ipHashSalt);

@@ -10,6 +10,7 @@ export interface ThreadMetadata {
   lastUpdatedAt: string;
   tagId?: string;
   editToken?: string;
+  version: number;
 }
 
 export async function createThreadWithFirstPost(
@@ -31,6 +32,7 @@ export async function createThreadWithFirstPost(
     MomentumScore: metadata.momentumScore,
     CreatedAt: metadata.createdAt,
     LastUpdatedAt: metadata.lastUpdatedAt,
+    Version: 1,
     ...(metadata.tagId ? { TagId: metadata.tagId, GSI3PK: `TAG#${metadata.tagId}`, GSI3SK: `LATEST#${metadata.lastUpdatedAt}` } : {}),
     ...(metadata.editToken ? { EditToken: metadata.editToken } : {})
   };
@@ -125,6 +127,7 @@ export async function getThreads(sort: 'momentum' | 'latest', limit: number, cur
       lastUpdatedAt: item.LastUpdatedAt,
       tagId: fullItem.TagId,
       likeCount: item.LikeCount || 0,
+      version: item.Version || 1,
     };
   });
 
@@ -207,6 +210,7 @@ export async function getThreadsLatest(limit: number, cursor?: string, tagId?: s
       lastUpdatedAt: item.LastUpdatedAt,
       tagId: fullItem.TagId,
       likeCount: item.LikeCount || 0,
+      version: item.Version || 1,
     };
   });
 
@@ -239,5 +243,6 @@ export async function getThreadById(threadId: string) {
     lastUpdatedAt: response.Item.LastUpdatedAt,
     tagId: response.Item.TagId,
     likeCount: response.Item.LikeCount || 0,
+    version: response.Item.Version || 1,
   };
 }

@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import useSWR from 'swr';
-import { fetcher, createPost, apiFetch, API_BASE_URL } from '../lib/api';
+import { fetcher, createPost, apiFetch, API_BASE_URL, WS_BASE_URL } from '../lib/api';
 import MediaUpload from '../components/MediaUpload';
 import { checkIsAdmin } from '../lib/auth';
+import { useNGFilter } from '../features/moderation/useNGFilter';
 
 
 export default function ThreadDetailPage() {
@@ -25,6 +26,57 @@ export default function ThreadDetailPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [mediaUrl, setMediaUrl] = useState('');
+  const { isHidden } = useNGFilter();
+
+  useEffect(() => {
+    if (!threadId) return;
+
+    let ws: WebSocket;
+    const connectWs = () => {
+      const url = new URL(WS_BASE_URL);
+      url.searchParams.append('threadId', threadId);
+      ws = new WebSocket(url.toString());
+
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === 'NEW_POST') {
+            mutate((currentData: any) => {
+              if (!currentData) return currentData;
+              // Check if post already exists
+              if (currentData.posts.some((p: any) => p.postId === payload.post.postId)) {
+                return currentData;
+              }
+              return {
+                ...currentData,
+                thread: {
+                  ...currentData.thread,
+                  resCount: Math.max(currentData.thread.resCount, payload.post.number)
+                },
+                posts: [...currentData.posts, payload.post]
+              };
+            }, false);
+          }
+        } catch (e) {
+          console.error('WS message error', e);
+        }
+      };
+
+      ws.onclose = () => {
+        // Auto-reconnect after 3s
+        setTimeout(connectWs, 3000);
+      };
+    };
+
+    connectWs();
+
+    return () => {
+      if (ws) {
+        ws.onclose = null; // Prevent reconnect loop
+        ws.close();
+      }
+    };
+  }, [threadId, mutate]);
 
   useEffect(() => {
     if (data && threadId) {
@@ -228,6 +280,13 @@ export default function ThreadDetailPage() {
   if (!data) return <div className="container"><div className="spinner" /></div>;
 
   const { thread, posts } = data;
+  
+  const visiblePosts = posts.map((post: any) => {
+    if (isHidden(post)) {
+      return { ...post, body: 'あぼーん', isDeleted: true, isNG: true, mediaUrl: undefined };
+    }
+    return post;
+  });
 
   const isBookmarked = () => {
     const bookmarks = JSON.parse(localStorage.getItem('dai2_bookmarks') || '[]');
@@ -274,7 +333,7 @@ export default function ThreadDetailPage() {
         </div>
 
         <div className="flex flex-col gap-4">
-          {posts.map((post: any) => (
+          {visiblePosts.map((post: any) => (
             <div key={post.postId} id={`post-${post.number}`} style={{ marginBottom: '15px' }}>
               <div className="text-sm mb-2">
                 <span style={{ fontWeight: 'normal' }}>{post.number} ：</span>
