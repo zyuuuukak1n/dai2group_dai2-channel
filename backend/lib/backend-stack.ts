@@ -160,7 +160,7 @@ export class BackendStack extends cdk.Stack {
 
     // Lambda Node.js Default Props
     const defaultNodejsProps: nodejs.NodejsFunctionProps = {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       handler: 'handler',
       environment: lambdaEnv,
       logRetention: logs.RetentionDays.ONE_MONTH,
